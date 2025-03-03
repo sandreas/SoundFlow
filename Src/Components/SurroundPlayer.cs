@@ -10,56 +10,14 @@ namespace SoundFlow.Components;
 /// <summary>
 /// A sound player that simulates surround sound with support for different speaker configurations and advanced panning methods.
 /// </summary>
-public sealed class SurroundPlayer : SoundComponent, ISoundPlayer
+public sealed class SurroundPlayer : SoundPlayerBase
 {
     private readonly LowPassModifier _lowPassFilter = new(120f);
-    private readonly ISoundDataProvider _dataProvider;
-    private int _samplePosition;
     private float _currentFrame;
-    private float _playbackSpeed = 1.0f;
-    private int _loopStartSamples;
-    private int _loopEndSamples = -1;
-
-    /// <inheritdoc />
-    public float PlaybackSpeed
-    {
-        get => _playbackSpeed;
-        set
-        {
-            if (value <= 0)
-                throw new ArgumentOutOfRangeException(nameof(value), "Playback speed must be greater than zero.");
-            _playbackSpeed = value;
-        }
-    }
 
     /// <inheritdoc />
     public override string Name { get; set; } = "Surround Player";
 
-    /// <inheritdoc />
-    public PlaybackState State { get; private set; }
-
-    /// <inheritdoc />
-    public bool IsLooping { get; set; }
-    
-    /// <inheritdoc />
-    public float Time => (float)_samplePosition / AudioEngine.Channels / AudioEngine.Instance.SampleRate / PlaybackSpeed;
-    
-    /// <inheritdoc />
-    public float Duration => (float)_dataProvider.Length / AudioEngine.Channels / AudioEngine.Instance.SampleRate / PlaybackSpeed;
-
-    /// <inheritdoc />
-    public int LoopStartSamples => _loopStartSamples;
-    
-    /// <inheritdoc />
-    public int LoopEndSamples => _loopEndSamples;
-
-    /// <inheritdoc />
-    public float LoopStartSeconds => (float)_loopStartSamples / AudioEngine.Channels / AudioEngine.Instance.SampleRate;
-
-    /// <inheritdoc />
-    public float LoopEndSeconds => _loopEndSamples == -1 ? -1 : (float)_loopEndSamples / AudioEngine.Channels / AudioEngine.Instance.SampleRate;
-
-    
     /// <summary>
     /// The speaker configuration to use for surround sound.
     /// </summary>
@@ -187,9 +145,8 @@ public sealed class SurroundPlayer : SoundComponent, ISoundPlayer
     /// <summary>
     /// A sound player that simulates surround sound with support for different speaker configurations.
     /// </summary>
-    public SurroundPlayer(ISoundDataProvider dataProvider)
+    public SurroundPlayer(ISoundDataProvider dataProvider) : base(dataProvider)
     {
-        _dataProvider = dataProvider ?? throw new ArgumentNullException(nameof(dataProvider));
         InitializePredefinedConfigurations();
         SetSpeakerConfiguration(_speakerConfig);
     }
@@ -263,6 +220,7 @@ public sealed class SurroundPlayer : SoundComponent, ISoundPlayer
         _delayIndices = new int[numChannels];
     }
 
+    // todo sandreas: method is pretty much equal to SoundPlayer except ProcessSurroundAudio(output);
     /// <inheritdoc />
     protected override void GenerateAudio(Span<float> output)
     {
@@ -549,54 +507,14 @@ public sealed class SurroundPlayer : SoundComponent, ISoundPlayer
     #region Audio Playback Control
     
     /// <inheritdoc />
-    public void Play()
-    {
-        Enabled = true;
-        State = PlaybackState.Playing;
-    }
-
-    /// <inheritdoc />
-    public void Pause()
-    {
-        Enabled = false;
-        State = PlaybackState.Paused;
-    }
-
-    /// <inheritdoc />
-    public void Stop()
-    {
-        Pause();
-        Seek(0);
-    }
-
-    /// <inheritdoc cref="ISoundPlayer"/>
-    public void Seek(TimeSpan offset, SeekOrigin seekOrigin = SeekOrigin.Begin)
-    {
-        var seekOffset = (float)offset.TotalMilliseconds / 1000;
-        switch (seekOrigin)
-        {
-            case SeekOrigin.Current:
-                Seek(Time + seekOffset);
-                break;
-            case SeekOrigin.End:
-                Seek(Duration + seekOffset);
-                break;
-            case SeekOrigin.Begin:
-            default:
-                Seek(seekOffset);
-                break;
-        }
-    }
-    
-    /// <inheritdoc />
-    public void Seek(float time)
+    public override void Seek(float time)
     {
         var sampleOffset = (int)(time * AudioEngine.Instance.SampleRate * AudioEngine.Channels);
         Seek(sampleOffset);
     }
 
     /// <inheritdoc />
-    public void Seek(int sampleOffset)
+    public override void Seek(int sampleOffset)
     {
         if (!_dataProvider.CanSeek)
             throw new InvalidOperationException("Seeking is not supported for this sound.");
@@ -611,20 +529,23 @@ public sealed class SurroundPlayer : SoundComponent, ISoundPlayer
 
     #region Loop Point Configuration Methods & Properties
 
+    // todo sandreas: method code is pretty similar, merge in Base? (SoundPlayer)
     /// <summary>
     /// Sets the loop points for the sound player in seconds.
     /// </summary>
     /// <param name="startTime">The loop start time in seconds. Must be non-negative.</param>
     /// <param name="endTime">The loop end time in seconds, optional. Use -1 or null to loop to the natural end of the audio. Must be greater than or equal to startTime, or -1.</param>
     /// <exception cref="ArgumentOutOfRangeException">Thrown if startTime is negative or endTime is invalid.</exception>
-    public void SetLoopPoints(float startTime, float? endTime = -1f)
+    public override void SetLoopPoints(float startTime, float? endTime = -1f)
     {
         if (startTime < 0)
             throw new ArgumentOutOfRangeException(nameof(startTime), "Loop start time cannot be negative.");
+        // todo sandreas: this is different from SoundPlayer (rounding issue?)
         if (endTime.HasValue && endTime != -1 && endTime < startTime)
             throw new ArgumentOutOfRangeException(nameof(endTime), "Loop end time must be greater than or equal to start time, or -1.");
 
         _loopStartSamples = (int)(startTime * AudioEngine.Instance.SampleRate * AudioEngine.Channels);
+        // todo sandreas: this is different from SoundPlayer (rounding issue?)
         _loopEndSamples = endTime.HasValue ? (endTime == -1 ? -1 : (int)(endTime.Value * AudioEngine.Instance.SampleRate * AudioEngine.Channels)) : -1;
 
 
@@ -633,13 +554,14 @@ public sealed class SurroundPlayer : SoundComponent, ISoundPlayer
         _loopEndSamples = _loopEndSamples == -1 ? -1 : Math.Clamp(_loopEndSamples, -1, _dataProvider.Length);
     }
 
+    // todo sandreas: method code is duplicated (SoundPlayer)
     /// <summary>
     /// Sets the loop points for the sound player in samples.
     /// </summary>
     /// <param name="startSample">The loop start sample. Must be non-negative.</param>
     /// <param name="endSample">The loop end sample, optional. Use -1 or null to loop to the natural end of the audio. Must be greater than or equal to startSample, or -1.</param>
     /// <exception cref="ArgumentOutOfRangeException">Thrown if startSample is negative or endSample is invalid.</exception>
-    public void SetLoopPoints(int startSample, int endSample = -1)
+    public override void SetLoopPoints(int startSample, int endSample = -1)
     {
         if (startSample < 0)
             throw new ArgumentOutOfRangeException(nameof(startSample), "Loop start sample cannot be negative.");
